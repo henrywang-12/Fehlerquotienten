@@ -12,7 +12,7 @@ const T = {
     accept: "Bestätigen", reject: "Verwerfen",
     addError: "Fehler hinzufügen", addErrorTitle: "Fehler manuell hinzufügen",
     original: "Originaltext", correction: "Korrektur", explanation: "Erklärung", type: "Typ",
-    save: "Hinzufügen", cancel: "Abbrechen", download: "Herunterladen", print: "Drucken",
+    save: "Hinzufügen", cancel: "Abbrechen", download: "Download", print: "Drucken",
     newAnalysis: "Neue Analyse", good: "Gut", sufficient: "Ausreichend", insufficient: "Mangelhaft",
     noErrors: "Keine Fehler gefunden", accepted: "bestätigt", rejected: "verworfen", manual: "manuell",
     privacy: "Datenschutz",
@@ -43,10 +43,10 @@ const T = {
 };
 
 const ECOLORS = {
-  G: { bg: "#FFF1ED", border: "#D85A30", badge: "#F0997B", text: "#4A1B0C" },
-  R: { bg: "#FFF0F0", border: "#E24B4A", badge: "#F09595", text: "#501313" },
-  W: { bg: "#FFF8E6", border: "#BA7517", badge: "#FAC775", text: "#412402" },
-  Z: { bg: "#EEF5FC", border: "#378ADD", badge: "#85B7EB", text: "#042C53" },
+  G: { bg: "#FFF1ED", border: "#D85A30", badge: "#F0997B", text: "#4A1B0C", highlight: "#FFD4C4" },
+  R: { bg: "#FFF0F0", border: "#E24B4A", badge: "#F09595", text: "#501313", highlight: "#FFD4D4" },
+  W: { bg: "#FFF8E6", border: "#BA7517", badge: "#FAC775", text: "#412402", highlight: "#FFE9B8" },
+  Z: { bg: "#EEF5FC", border: "#378ADD", badge: "#85B7EB", text: "#042C53", highlight: "#CBE4F9" },
 };
 
 const ELABELS = {
@@ -61,6 +61,68 @@ const fqGrade = (fq, t) => {
   if (fq <= 6) return { label: t.sufficient, c: "#8a6d1b", bg: "#fdf8ec" };
   return { label: t.insufficient, c: "#b33030", bg: "#fdf0f0" };
 };
+
+// NEU: Text mit Fehler-Highlights rendern
+function HighlightedText({ text, errors, lang }) {
+  if (!text) return null;
+  
+  const activeErrors = errors.filter((e) => e.status !== "rejected");
+  if (activeErrors.length === 0) return <span style={{ fontSize: 14, lineHeight: 2, color: "#333" }}>{text}</span>;
+
+  // Sortiere Fehler nach Position im Text (längere zuerst, um Überlappungen zu vermeiden)
+  const sorted = [...activeErrors].sort((a, b) => {
+    const posA = text.indexOf(a.original);
+    const posB = text.indexOf(b.original);
+    if (posA === posB) return b.original.length - a.original.length;
+    return posA - posB;
+  });
+
+  let parts = [];
+  let lastIndex = 0;
+  const used = new Set();
+
+  sorted.forEach((err) => {
+    const idx = text.indexOf(err.original, lastIndex);
+    if (idx === -1 || used.has(`${idx}-${err.original}`)) return;
+    used.add(`${idx}-${err.original}`);
+
+    // Text vor dem Fehler
+    if (idx > lastIndex) {
+      parts.push(<span key={`t-${lastIndex}`}>{text.slice(lastIndex, idx)}</span>);
+    }
+
+    // Der Fehler selbst
+    parts.push(
+      <mark
+        key={`e-${idx}`}
+        style={{
+          background: ECOLORS[err.type]?.highlight || "#FFE0E0",
+          borderRadius: 3,
+          padding: "1px 2px",
+          cursor: "pointer",
+          borderBottom: `2px solid ${ECOLORS[err.type]?.border || "#E24B4A"}`,
+          position: "relative",
+        }}
+        title={`${ELABELS[lang][err.type]}: ${err.original} → ${err.correction}\n${err.explanation}`}
+      >
+        {err.original}
+      </mark>
+    );
+
+    lastIndex = idx + err.original.length;
+  });
+
+  // Restlicher Text
+  if (lastIndex < text.length) {
+    parts.push(<span key={`t-${lastIndex}`}>{text.slice(lastIndex)}</span>);
+  }
+
+  return (
+    <div style={{ fontSize: 14, lineHeight: 2.2, color: "#333", whiteSpace: "pre-wrap" }}>
+      {parts}
+    </div>
+  );
+}
 
 export default function Page() {
   const [lang, setLang] = useState("de");
@@ -251,9 +313,10 @@ export default function Page() {
           </div>
         )}
 
-        {/* STEP 2 */}
+        {/* STEP 2 - NEU: Zwei-Panel-Ansicht */}
         {step === 2 && (
           <div>
+            {/* Stats-Leiste */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: 16 }}>
               {[{ l: t.words, v: wc }, { l: t.errors, v: active.length }, { l: t.fq, v: fq, c: gr.c }, { l: t.grade, v: gr.label, c: gr.c }].map((m, i) => (
                 <div key={i} style={s.card}>
@@ -271,15 +334,47 @@ export default function Page() {
               ))}
             </div>
 
-            {transcription && (
-              <div style={s.card}>
-                <div style={s.label}>{t.recognized}</div>
-                <p style={{ fontSize: 13, lineHeight: 1.8, color: "#333" }}>{transcription}</p>
-              </div>
-            )}
-
             {summary && <div style={{ background: "#f5f5f2", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: "#555", lineHeight: 1.6 }}>{summary}</div>}
 
+            {/* ZWEI-PANEL: Bild links, markierter Text rechts */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
+              {/* Linkes Panel: Originalbild */}
+              <div>
+                <div style={{ ...s.label, marginBottom: 6 }}>📷 Original</div>
+                <div style={{ background: "#fff", border: "1px solid #eeede8", borderRadius: 10, overflow: "hidden" }}>
+                  <img
+                    src={imgSrc}
+                    style={{ width: "100%", display: "block", cursor: "zoom-in" }}
+                    alt="Original exam"
+                    onClick={() => window.open(imgSrc, "_blank")}
+                  />
+                </div>
+                <div style={{ fontSize: 10, color: "#bbb", marginTop: 4, textAlign: "center" }}>{t.recognized} — Zum Vergrößern anklicken</div>
+              </div>
+
+              {/* Rechtes Panel: Markierter Text */}
+              <div>
+                <div style={{ ...s.label, marginBottom: 6 }}>✏️ {t.recognized}</div>
+                <div style={{ background: "#fff", border: "1px solid #eeede8", borderRadius: 10, padding: 14, minHeight: 200, maxHeight: 500, overflowY: "auto" }}>
+                  {transcription ? (
+                    <HighlightedText text={transcription} errors={errors} lang={lang} />
+                  ) : (
+                    <p style={{ fontSize: 13, color: "#bbb", textAlign: "center", padding: 40 }}>{t.analyzing}</p>
+                  )}
+                </div>
+                {/* Legende */}
+                <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                  {Object.entries(ECOLORS).map(([type, col]) => (
+                    <span key={type} style={{ fontSize: 9, display: "flex", alignItems: "center", gap: 4, color: "#888" }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 2, background: col.highlight, border: `1px solid ${col.border}` }} />
+                      {ELABELS[lang][type]}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Fehlerliste */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <span style={s.label}>{t.errorList}</span>
               <button onClick={() => setShowAdd(true)} style={{ fontSize: 11, fontWeight: 500, padding: "5px 12px", borderRadius: 6, border: "1px dashed #ccc", background: "none", color: "#666", cursor: "pointer" }}>+ {t.addError}</button>
@@ -342,62 +437,4 @@ export default function Page() {
               <button onClick={doDownload} style={{ ...s.btn, ...s.btnSecondary, flex: 1, padding: 12, fontSize: 13 }}>{t.download}</button>
               <button onClick={doPrint} style={{ ...s.btn, ...s.btnPrimary, flex: 1, padding: 12, fontSize: 13 }}>{t.print}</button>
             </div>
-            <button onClick={reset} style={{ ...s.btn, ...s.btnSecondary, width: "100%", padding: 10, fontSize: 12, color: "#888" }}>{t.newAnalysis}</button>
-          </div>
-        )}
-      </main>
-
-      {/* Add Error Modal */}
-      {showAdd && (
-        <div style={s.overlay} onClick={() => setShowAdd(false)}>
-          <div style={s.modal} onClick={(e) => e.stopPropagation()}>
-            <AddModal lang={lang} t={t} onSave={addErr} onClose={() => setShowAdd(false)} />
-          </div>
-        </div>
-      )}
-
-      {/* Privacy Modal */}
-      {showPrivacy && (
-        <div style={s.overlay} onClick={() => setShowPrivacy(false)}>
-          <div style={s.modal} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>{t.privacy}</h3>
-            <p style={{ fontSize: 13, color: "#555", lineHeight: 1.7, marginBottom: 16 }}>{t.privacyText}</p>
-            <button onClick={() => setShowPrivacy(false)} style={{ width: "100%", padding: 8, fontSize: 12, border: "1px solid #e5e4df", borderRadius: 6, background: "#fff", cursor: "pointer" }}>{t.close}</button>
-          </div>
-        </div>
-      )}
-
-      <footer style={{ textAlign: "center", padding: "24px 16px 16px", fontSize: 10, color: "#ccc" }}>{t.title} &middot; {t.subtitle}</footer>
-    </div>
-  );
-}
-
-function AddModal({ lang, t, onSave, onClose }) {
-  const [type, setType] = useState("G");
-  const [original, setOriginal] = useState("");
-  const [correction, setCorrection] = useState("");
-  const [explanation, setExplanation] = useState("");
-  const inp = { width: "100%", border: "1px solid #e5e4df", borderRadius: 6, padding: "8px 10px", fontSize: 13, background: "#fafaf8", color: "#1a1a18", outline: "none", marginBottom: 10 };
-
-  return (
-    <div>
-      <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 14 }}>{t.addErrorTitle}</h3>
-      <label style={{ fontSize: 11, color: "#888", display: "block", marginBottom: 4 }}>{t.type}</label>
-      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-        {["G","R","W","Z"].map((tp) => (
-          <button key={tp} onClick={() => setType(tp)} style={{ flex: 1, padding: 6, fontSize: 11, fontWeight: 600, borderRadius: 6, cursor: "pointer", border: type===tp ? `2px solid ${ECOLORS[tp].border}` : "1px solid #e5e4df", background: type===tp ? ECOLORS[tp].bg : "#fff", color: type===tp ? ECOLORS[tp].text : "#888" }}>{ELABELS[lang][tp]}</button>
-        ))}
-      </div>
-      <label style={{ fontSize: 11, color: "#888", display: "block", marginBottom: 4 }}>{t.original}</label>
-      <input value={original} onChange={(e) => setOriginal(e.target.value)} style={inp} />
-      <label style={{ fontSize: 11, color: "#888", display: "block", marginBottom: 4 }}>{t.correction}</label>
-      <input value={correction} onChange={(e) => setCorrection(e.target.value)} style={inp} />
-      <label style={{ fontSize: 11, color: "#888", display: "block", marginBottom: 4 }}>{t.explanation}</label>
-      <input value={explanation} onChange={(e) => setExplanation(e.target.value)} style={inp} />
-      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-        <button onClick={onClose} style={{ flex: 1, padding: 8, fontSize: 12, border: "1px solid #e5e4df", borderRadius: 6, background: "#fff", cursor: "pointer", color: "#888" }}>{t.cancel}</button>
-        <button onClick={() => { if (original.trim() && correction.trim()) onSave({ type, original: original.trim(), correction: correction.trim(), explanation: explanation.trim() }); }} style={{ flex: 1, padding: 8, fontSize: 12, fontWeight: 600, border: "none", borderRadius: 6, background: "#1a1a18", color: "#fff", cursor: "pointer" }}>{t.save}</button>
-      </div>
-    </div>
-  );
-}
+            <button onClick={reset} style

@@ -27,8 +27,10 @@ export async function POST(req) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: "gpt-4o",
         max_tokens: 2000,
+        temperature: 0,
+        seed: 42,
         messages: [
           { role: "system", content: systemPrompt },
           {
